@@ -1,12 +1,12 @@
 {
   "name": "thehaven-bot",
   "version": "1.0.0",
-  "description": "Simple Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.21.0"
+    "discord.js": "^14.21.0",
+    "@discordjs/voice": "^0.18.0"
   }
 }
