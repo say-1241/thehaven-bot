@@ -1,102 +1,140 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { 
+    Client, 
+    GatewayIntentBits, 
+    REST, 
+    Routes, 
+    SlashCommandBuilder, 
+    EmbedBuilder, 
+    PermissionFlagsBits 
+} = require('discord.js');
 const http = require('http');
 
-// 1. سيرفر وهمي لمنع Render من إيقاف البوت
+// 1. خادوم وهمي لـ Render (Port Binding)
 http.createServer((req, res) => {
     res.write("Bot is alive!");
     res.end();
 }).listen(process.env.PORT || 3000);
 
+// 2. إنشاء العميل
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildVoiceStates,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers
     ]
 });
 
-const PREFIX = '!'; // تقدر تغير البداية لأي رمز تحبه
+// 3. تعريف أوامر السلاش (Slash Commands Definition)
+const commands = [
+    new SlashCommandBuilder()
+        .setName('ping')
+        .setDescription('فحص استجابة وسرعة البوت'),
 
-client.once('ready', () => {
-    console.log(`🤖 البوت أونلاين وجاهز: ${client.user.tag}`);
+    new SlashCommandBuilder()
+        .setName('avatar')
+        .setDescription('عرض صورتك الشخصية أو صورة عضو آخر')
+        .addUserOption(option => 
+            option.setName('user')
+                .setDescription('العضو المراد عرض صورته')
+                .setRequired(false)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('user')
+        .setDescription('عرض معلومات الحساب الشخصي')
+        .addUserOption(option => 
+            option.setName('user')
+                .setDescription('العضو المراد عرض معلوماته')
+                .setRequired(false)
+        ),
+
+    new SlashCommandBuilder()
+        .setName('clear')
+        .setDescription('مسح عدد معين من الرسائل في الروم')
+        .addIntegerOption(option => 
+            option.setName('amount')
+                .setDescription('عدد الرسائل المراد مسحها (1-100)')
+                .setRequired(true)
+        )
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+].map(command => command.toJSON());
+
+// 4. تسجيل الأوامر عند تشغيل البوت
+client.once('ready', async () => {
+    console.log(`✅ البوت متصل الآن باسم: ${client.user.tag}`);
+
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+
+    try {
+        console.log('🔄 جاري تسجيل أوامر السلاش (Slash Commands)...');
+        
+        // تسجيل الأوامر عالمياً على مستوى كل السيرفرات
+        await rest.put(
+            Routes.applicationCommands(client.user.id),
+            { body: commands }
+        );
+
+        console.log('🎉 تم تسجيل جميع أوامر السلاش بنجاح!');
+    } catch (error) {
+        console.error('❌ حدث خطأ أثناء تسجيل الأوامر:', error);
+    }
 });
 
-client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+// 5. الاستجابة للتفاعل مع الأوامر (Interaction Create)
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
 
-    const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
+    const { commandName } = interaction;
 
-    // 🖼️ أمر الأفاتار (!avatar)
-    if (command === 'avatar' || command === 'افتار') {
-        const user = message.mentions.users.first() || message.author;
-        const avatarEmbed = new EmbedBuilder()
-            .setTitle(`🖼️ صورة ${user.username}`)
-            .setImage(user.displayAvatarURL({ dynamic: true, size: 1024 }))
-            .setColor('#5865F2');
-
-        return message.reply({ embeds: [avatarEmbed] });
+    // أمر /ping
+    if (commandName === 'ping') {
+        return interaction.reply({ content: `🏓 بونج! سرعة الاستجابة: **${client.ws.ping}ms**`, ephemeral: true });
     }
 
-    // 👤 أمر معلومات الحساب (!user)
-    if (command === 'user' || command === 'يوزر') {
-        const member = message.mentions.members.first() || message.member;
-        const userEmbed = new EmbedBuilder()
-            .setTitle(`👤 معلومات: ${member.user.username}`)
-            .setThumbnail(member.user.displayAvatarURL())
+    // أمر /avatar
+    if (commandName === 'avatar') {
+        const user = interaction.options.getUser('user') || interaction.user;
+        const avatarUrl = user.displayAvatarURL({ dynamic: true, size: 1024 });
+
+        const embed = new EmbedBuilder()
+            .setTitle(`🖼️ صورة ${user.username}`)
+            .setImage(avatarUrl)
+            .setColor('#5865F2');
+
+        return interaction.reply({ embeds: [embed] });
+    }
+
+    // أمر /user
+    if (commandName === 'user') {
+        const targetUser = interaction.options.getUser('user') || interaction.user;
+        const member = await interaction.guild.members.fetch(targetUser.id);
+
+        const embed = new EmbedBuilder()
+            .setTitle(`👤 معلومات: ${targetUser.username}`)
+            .setThumbnail(targetUser.displayAvatarURL())
             .addFields(
-                { name: 'الاسم الكامل:', value: `${member.user.tag}`, inline: true },
-                { name: 'الآيدي (ID):', value: `${member.id}`, inline: true },
+                { name: 'الاسم:', value: `${targetUser.tag}`, inline: true },
+                { name: 'الآيدي:', value: `${targetUser.id}`, inline: true },
                 { name: 'تاريخ انضمام السيرفر:', value: `<t:${Math.floor(member.joinedTimestamp / 1000)}:R>`, inline: false },
-                { name: 'تاريخ إنشاء الحساب:', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: false }
+                { name: 'تاريخ إنشاء الحساب:', value: `<t:${Math.floor(targetUser.createdTimestamp / 1000)}:R>`, inline: false }
             )
             .setColor('#00FF7F');
 
-        return message.reply({ embeds: [userEmbed] });
+        return interaction.reply({ embeds: [embed] });
     }
 
-    // 🏰 أمر معلومات السيرفر (!server)
-    if (command === 'server' || command === 'سيرفر') {
-        const { guild } = message;
-        const serverEmbed = new EmbedBuilder()
-            .setTitle(`🏰 معلومات سيرفر: ${guild.name}`)
-            .setThumbnail(guild.iconURL())
-            .addFields(
-                { name: 'صاحب السيرفر:', value: `<@${guild.ownerId}>`, inline: true },
-                { name: 'عدد الأعضاء:', value: `${guild.memberCount}`, inline: true },
-                { name: 'تاريخ الإنشاء:', value: `<t:${Math.floor(guild.createdTimestamp / 1000)}:R>`, inline: false }
-            )
-            .setColor('#FFD700');
+    // أمر /clear
+    if (commandName === 'clear') {
+        const amount = interaction.options.getInteger('amount');
 
-        return message.reply({ embeds: [serverEmbed] });
-    }
-
-    // 🧹 أمر مسح الشات (!clear 10)
-    if (command === 'clear' || command === 'مسح') {
-        if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-            return message.reply('❌ ما عندك صلاحية مسح الرسائل!');
+        if (amount < 1 || amount > 100) {
+            return interaction.reply({ content: '⚠️ يرجى إدخال رقم بين 1 و 100.', ephemeral: true });
         }
 
-        const amount = parseInt(args[0]);
-        if (isNaN(amount) || amount < 1 || amount > 100) {
-            return message.reply('⚠️ اكتب رقم من 1 إلى 100 (مثال: `!clear 10`)');
-        }
-
-        await message.channel.bulkDelete(amount, true);
-        const msg = await message.channel.send(`✅ تم مسح **${amount}** رسالة بنجاح.`);
-        setTimeout(() => msg.delete(), 3000); // يحذف رسالة التأكيد بعد 3 ثواني
-    }
-
-    // 📢 أمر كرر الكلام (!say)
-    if (command === 'say' || command === 'قول') {
-        const text = args.join(' ');
-        if (!text) return message.reply('اكتب الكلام اللي تبي البوت يقوله!');
-        
-        message.delete(); // يحذف أمر العضو
-        return message.channel.send(text);
+        await interaction.channel.bulkDelete(amount, true);
+        await interaction.reply({ content: `🧹 تم مسح **${amount}** رسالة بنجاح.`, ephemeral: true });
     }
 });
 
+// تسجيل الدخول
 client.login(process.env.TOKEN);
