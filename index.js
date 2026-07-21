@@ -1,81 +1,88 @@
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { 
+    Client, 
+    GatewayIntentBits, 
+    REST, 
+    Routes, 
+    SlashCommandBuilder, 
+    EmbedBuilder, 
+    PermissionFlagsBits 
+} = require('discord.js');
 const http = require('http');
 
-// 1. سيرفر وهمي لمنع Render من إيقاف البوت
+// سيرفر وهمي لـ Render
 http.createServer((req, res) => {
     res.write("Bot is alive!");
     res.end();
 }).listen(process.env.PORT || 3000);
 
-// 2. إعداد البوت
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildVoiceStates
+        GatewayIntentBits.GuildMembers
     ]
 });
 
-client.once('ready', () => {
-    console.log(`✅ البوت شغال وجاهز 100%: ${client.user.tag}`);
+// تعريف الأوامر
+const commands = [
+    new SlashCommandBuilder()
+        .setName('ping')
+        .setDescription('فحص سرعة البوت'),
+
+    new SlashCommandBuilder()
+        .setName('avatar')
+        .setDescription('عرض الأفاتار')
+        .addUserOption(opt => opt.setName('user').setDescription('العضو').setRequired(false)),
+
+    new SlashCommandBuilder()
+        .setName('clear')
+        .setDescription('مسح الرسائل')
+        .addIntegerOption(opt => opt.setName('amount').setDescription('العدد من 1 إلى 100').setRequired(true))
+        .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
+].map(cmd => cmd.toJSON());
+
+client.once('ready', async () => {
+    console.log(`✅ البوت متصل: ${client.user.tag}`);
+    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    try {
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        console.log('🎉 تم تسجيل أوامر السلاش بنجاح!');
+    } catch (e) {
+        console.error(e);
+    }
 });
 
-// 3. الاستماع للأوامر العادية
-client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
+// الاستجابة لأوامر السلاش
+client.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
 
-    const content = message.content.trim();
+    // أهم خطوة لعدم ظهور خطأ The application did not respond
+    await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-    // فحص الاستجابة
-    if (content === '!ping' || content === '!تجربة') {
-        return message.reply('🏓 بونج! البوت شغال وجاهز!');
+    const { commandName } = interaction;
+
+    if (commandName === 'ping') {
+        return interaction.editReply(`🏓 بونج! السرعة: **${client.ws.ping}ms**`);
     }
 
-    // أمر الأفاتار
-    if (content.startsWith('!avatar') || content.startsWith('!افتار')) {
-        const user = message.mentions.users.first() || message.author;
+    if (commandName === 'avatar') {
+        const user = interaction.options.getUser('user') || interaction.user;
         const embed = new EmbedBuilder()
             .setTitle(`🖼️ صورة ${user.username}`)
             .setImage(user.displayAvatarURL({ dynamic: true, size: 1024 }))
             .setColor('#5865F2');
 
-        return message.reply({ embeds: [embed] });
+        return interaction.editReply({ embeds: [embed] });
     }
 
-    // أمر معلومات الحساب
-    if (content.startsWith('!user') || content.startsWith('!يوزر')) {
-        const member = message.mentions.members.first() || message.member;
-        const embed = new EmbedBuilder()
-            .setTitle(`👤 معلومات: ${member.user.username}`)
-            .setThumbnail(member.user.displayAvatarURL())
-            .addFields(
-                { name: 'الاسم:', value: `${member.user.tag}`, inline: true },
-                { name: 'الآيدي:', value: `${member.id}`, inline: true },
-                { name: 'تاريخ الإنشاء:', value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: false }
-            )
-            .setColor('#00FF7F');
-
-        return message.reply({ embeds: [embed] });
-    }
-
-    // أمر مسح الشات
-    if (content.startsWith('!clear') || content.startsWith('!مسح')) {
-        if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-            return message.reply('❌ ما عندك صلاحية مسح الرسائل!');
+    if (commandName === 'clear') {
+        const amount = interaction.options.getInteger('amount');
+        if (amount < 1 || amount > 100) {
+            return interaction.editReply('⚠️ اكتب رقم من 1 إلى 100.');
         }
 
-        const args = content.split(' ');
-        const amount = parseInt(args[1]);
-
-        if (isNaN(amount) || amount < 1 || amount > 100) {
-            return message.reply('⚠️ اكتب رقم من 1 إلى 100، مثال: `!مسح 10`');
-        }
-
-        await message.channel.bulkDelete(amount, true);
-        const msg = await message.channel.send(`🧹 تم مسح **${amount}** رسالة.`);
-        setTimeout(() => msg.delete().catch(() => {}), 3000);
+        await interaction.channel.bulkDelete(amount, true);
+        return interaction.editReply(`🧹 تم مسح **${amount}** رسالة بنجاح.`);
     }
 });
 
